@@ -1,0 +1,57 @@
+Title         : Telephony
+Author        : 李佳节 
+Logo          : True
+Title Note  : &date; (version 1.0)
+Sub Title   : 中子研究所
+Package : [UTF8]ctex
+
+[TITLE]
+
+
+# 概述 
+
+Android系统是主流的手机操作系统，手机在人们生活中的的存在最不可忽视的功能就是通信，
+Android系统中的的Telephony为此功能的核心模块，Telephony主要提供了语音，短信，彩信，数据链接，SIM卡管理，电话簿等功能。
+
+Telephony架构图如下所示
+
+![telephony]
+
+[telephony]: images/telephony.png "telephony" { width:auto; max-width:90% }
+
+
+
+**应用层(Application)**
+
+面向用户的应用层，依赖于应用框架层，通过访问Telephony应用框架层的业务模块来呈现给用户具体的功能，
+主要包括Phone、Contacts、SMS等应用,Phone比较特殊，系统启动时就被运行起来了，且Phone启动时会创建Telephony框架层，并与之运行在同一个进程中
+
+
+**应用框架层(Framework)**
+
+Telephony应用框架层主要包括RILJ、Service、业务功能模块三个部分构成，提供了电话，短信，联系人等所需的所有功能
+
+**User Libraries/HAL 层**
+
+这一层也叫做本地RIL层，RIL(Radio Interface Layer)是Telephony框架层与Modem之间的接口层，
+RIL将Modem提供的各种服务进行了抽象，以提供给Framework层统一的接口
+
+**驱动层(Modem)**
+
+RIL 驱动用于实现电话功能,主要硬件是通信模块(Modem),Modem 通过与通信网络进行沟通,传输语音及数据,完成呼叫、短信等相关电话功能。
+目前的智能机在硬件上多采用双 cpu 的架构,主处理器和从处理器。主处理器也叫AP(Application Processor,应用处理器)，从处理器也叫BP（Baseband Processor，基带处理器）。
+主处理器运行操作系统和各种应用程序，一个是基带处理器,主要处理数字信号、语音信号的编码解码以及通信3协议,基带处理器、射频和其它外围芯片作为一个 Modem 模块,提供 AT 命令接口。
+
+
+# 通话流程解析
+
+## 主叫
+
+![Dial]
+
+[Dial]: images/Dial.png "Dial" { width:auto; max-width:90% }
+
+
+
+
+[reference manual]: http://research.microsoft.com/en-us/um/people/daan/madoko/doc/reference.html  "Madoko reference manual"
