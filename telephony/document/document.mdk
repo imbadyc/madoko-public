@@ -1,0 +1,1164 @@
+Title         : Telephony通话
+Author        : 李佳节 
+#Logo          : True
+Title Note  : &date; (version 1.0)
+#Affiliation   : 中子研究所
+Package : [UTF8]ctex
+
+[INCLUDE=book]
+[INCLUDE=webtoc]
+[INCLUDE=webanchors]
+
+[TITLE]
+
+~ Begin SidePanel
+[TOC]
+~ End SidePanel
+
+~ Begin MainPanel
+
+# 概述 
+
+Android系统是主流的手机操作系统，手机在人们生活中的的存在最不可忽视的功能就是通信，
+Android系统中的的Telephony为此功能的核心模块，Telephony主要提供了通话，短信，彩信，数据链接，SIM卡管理，电话簿等功能。
+
+Telephony框架结构从上到下分为四层：
+
+
+- 应用层：包含android的应用程序 \
+- 应用框架层：也就是常说的framework，包含常用的API框架 \
+- 系统运行层：包含c/c++核心库和HAL层等
+- 驱动层：RIL 驱动用于实现电话功能,主要硬件是通信模块(Modem),Modem 通过与通信网络进行沟通,传输语音及数据,完成呼叫、短信等相关电话功能
+
+目前的智能机在硬件上多采用双 cpu 的架构,主处理器和从处理器。主处理器也叫AP(Application Processor,应用处理器)，从处理器也叫BP（Baseband Processor，基带处理器）。
+主处理器运行操作系统和各种应用程序，基带处理器主要处理数字信号、语音信号的编码解码以及通信协议,基带处理器、射频和其它外围芯片作为一个 Modem 模块,提供 AT 命令接口。
+Android Telephony业务跨越AP,BP，AP和BP之间的相互通讯。系统框架图如下所示：
+
+![telephony2]
+
+[telephony2]: images/telephony2.png "telephony2" { width:auto; max-width:90% }
+
+
+
+# Telephony之应用层
+
+
+面向用户的应用层，依赖于应用框架层，通过访问Telephony应用框架层的业务模块来呈现给用户具体的功能，
+主要包括Phone、Contacts、SMS等应用,Phone比较特殊，系统启动时就被运行起来了，且Phone启动时会创建Telephony框架层，
+并与之运行在同一个进程中。
+
+## Phone启动流程
+
+
+# Telephony应用框架层(Framework)
+
+
+Telephony应用框架层主要包括RILJ、Service、业务功能模块三个部分构成，提供了电话，短信，联系人等所需的所有功能。具体包括：
+
+* RILJ --- RILJ是Telephony和本地RIL的通信接口，通过Socket与RILD完成电话服务命令的收发，项目路径
+/frameworks/opt/telephony/src/java/com/android/internal/telephony
+* Service --- 基于IBinder提供了各种功能的Service，以便于业务功能模块的实现，主要有两类服务Telecomm和Telephony，
+Telephony关注通话，语音等核心业务，
+Telecomm主要作用是管理Android系统当前的通话,如来电显示，接听电话，挂断电话等功能，在Telephony模块与上层UI之间起到了一个桥梁的作用。
+比如，Telephony有接收到新的来电时，首先会告知Telecom,然后由Telecom服务通知上层应用来电信息，并显示来电界面。
+代码路径：
+  - /packages/services/Telecomm
+  - /packages/services/Telephony
+* 业务功能模块 --- Telephony业务功能模块主要包括语音、短信、ICC 卡、网络服务以及数据连接等，
+这些功能模块是Android系统通话功能的核心和基础，代码路径为：
+ - /frameworks/base/Telecomm
+ - /frameworks/base/Telephony
+ - /frameworks/opt/Telephony
+ 
+## RILJ分析
+## Telecomm服务分析
+## Telephony服务分析
+## Telephony解析之UICC
+
+
+# Telephony之User Libraries/HAL 层
+
+
+这一层也叫做本地RIL层，具有处于整个Telephony系统的中间接口层，具有承上启下的作用，对下定义了Telephony框架层与Modem之间的接口层，
+对上将Modem提供的各种服务进行了抽象，以提供给Framework层统一的接口，包含：
+
+ - RIL抽象层，实现RIL层框架，包括RILD守护进程和RIL库（libril），定义了其与Framework层、Vendor RIL之间的接口
+ - RIL实现层，基于不同Modem厂商的RIL功能实现（Vendor RIL）,其主要功能是接受 RIL 层的主动 Request,
+ 转发给 Modem,同时接受 Modem 返回的请求 Response 和主动上报事件,上报给 RIL 层
+
+Android通过RIL实现层隔离了不同的modem及厂商实现的差异，对上通过RIL抽象层提供统一的接口。接口定义方式为：
+
+
+Vendor RIL通过RIL_Init向RILD暴露实现接口RIL_RadioFunctions。
+
+
+``` javascript
+typedef struct {
+    int version;        /* set to RIL_VERSION */
+    RIL_RequestFunc onRequest;
+    RIL_RadioStateRequest onStateRequest;
+    RIL_Supports supports;
+    RIL_Cancel onCancel;
+    RIL_GetVersion getVersion;
+} RIL_RadioFunctions;
+```
+* version --- Android RIL版本
+* onRequest --- RIL 主动命令入口处理函数，vendor ril处理完成后必须调用 RIL_onRequestComplete()进行通知
+* onStateRequest --- 返回当前通讯状态，一个有RADIO_STATE_OFF，RADIO_STATE_UNAVAILABLE，RADIO_STATE_ON三种状态
+* supports --- 查询是否支持某request，支持返回1，否则返回0
+* onCancel --- 取消一个待处理请求
+* getVersion --- 返回Vendor RIL带版本的全名称
+
+libril提供回调：
+
+``` javascript
+static struct RIL_Env s_rilEnv = {
+    RIL_onRequestComplete,
+    RIL_onUnsolicitedResponse,
+    RIL_requestTimedCallback,
+    RIL_onRequestAck
+};
+```
+
+* RIL_onRequestComplete --- 对应RIL_RequestFunc，在主动请求完成时通知框架
+* RIL_onUnsolicitedResponse --- Vendor Ril接收到被动请求之后通知框架
+* RIL_requestTimedCallback --- 在RIL_RequestFunc调用线程插入指定回调（确保调用在RIL_RequestFunc线程内，防止多线程同步等问题）
+* RIL_onRequestAck --- 和异步RIL请求有关，暂未研究
+
+RIL层框架图：
+
+![RIL-arti]
+
+[RIL-arti]: images/RIL-arti.png "RIL-arti" { width:auto; max-width:90% }
+
+
+在 Android 8.0（不含）之前，Telephony 和 modem 之间一直用 socket 进行连接通信 。
+其实通过 socket 连接的两个上下层模块，已经非常的解耦，也具有 HIDL 独立编译的特性，但是应用范围受到限制，
+socket 通信的速度和接口的定义等不是很理想，没有大范围的应用到各个模块。
+HIDL 技术的推出，可以替换通过 socket 连接的各个模块，发挥 HIDL 技术的优势。
+
+**接口注册：**
+
+``` javascript
+void radio::registerService(RIL_RadioFunctions *callbacks, CommandInfo *commands) {
+    using namespace android::hardware;
+    int simCount = 1;
+    const char *serviceNames[] = {
+            android::RIL_getServiceName()
+            #if (SIM_COUNT >= 2)
+            , RIL2_SERVICE_NAME
+            #if (SIM_COUNT >= 3)
+            , RIL3_SERVICE_NAME
+            #if (SIM_COUNT >= 4)
+            , RIL4_SERVICE_NAME
+            #endif
+            #endif
+            #endif
+            };
+
+    #if (SIM_COUNT >= 2)
+    simCount = SIM_COUNT;
+    #endif
+
+    s_vendorFunctions = callbacks;
+    s_commands = commands;
+
+    configureRpcThreadpool(1, true /* callerWillJoin */);
+    for (int i = 0; i < simCount; i++) {
+        pthread_rwlock_t *radioServiceRwlockPtr = getRadioServiceRwlock(i);
+        int ret = pthread_rwlock_wrlock(radioServiceRwlockPtr);
+        assert(ret == 0);
+
+        radioService[i] = new RadioImpl;
+        radioService[i]->mSlotId = i;
+        RLOGD("registerService: starting android::hardware::radio::V1_1::IRadio %s",
+                serviceNames[i]);
+        android::status_t status = radioService[i]->registerAsService(serviceNames[i]);
+
+        if (kOemHookEnabled) {
+            oemHookService[i] = new OemHookImpl;
+            oemHookService[i]->mSlotId = i;
+            status = oemHookService[i]->registerAsService(serviceNames[i]);
+        }
+
+        ret = pthread_rwlock_unlock(radioServiceRwlockPtr);
+        assert(ret == 0);
+    }
+}
+```
+
+**接口定义：**
+
+``` javascript
+struct RadioImpl : public V1_1::IRadio {
+    int32_t mSlotId;
+    sp<IRadioResponse> mRadioResponse;
+    sp<IRadioIndication> mRadioIndication;
+    sp<V1_1::IRadioResponse> mRadioResponseV1_1;
+    sp<V1_1::IRadioIndication> mRadioIndicationV1_1;
+
+    Return<void> setResponseFunctions(
+            const ::android::sp<IRadioResponse>& radioResponse,
+            const ::android::sp<IRadioIndication>& radioIndication);
+
+    Return<void> getIccCardStatus(int32_t serial);
+
+    Return<void> supplyIccPinForApp(int32_t serial, const hidl_string& pin,
+            const hidl_string& aid);
+    Return<void> dial(int32_t serial, const Dial& dialInfo);
+    ...
+```
+
+可以看到底层接收上层的数据，HIDL 比 socket 都简洁、条理和易懂。也可以看出，从 socket 切换到 HIDL 只需把接口的地方更换即可，
+相当方便。
+
+
+**Rild运行流程分析**
+
+
+
+![Rild]
+
+[Rild]: images/Rild.png "Rild" { width:auto; max-width:90% }
+
+
+
+1. RILD守护进程随着系统初始化而创建，根据系统property选择加载的Vendor RIL，通过dlopen动态加载对应so.
+2. 通过RIL_startEventLoop开启事件监听线程eventLoop.
+3. 调用RIL_Init获取到相应接口， Vendor RIL 模块在RIL_Init接口中进行初始化，同时开启readerLoop线程监控底层消息
+4. 调用RIL_register实现接口动态注册，包括libril和vendor ril之间的接口注册和调用
+registerService实现HIDL接口注册
+5. joinRpcThreadpool()把当前的通信加入HwBinder的线程池进行循环 
+6. readerLoop通过循环遍历pipe上是否有新的命令产生，是则回调RIL_Env.
+RIL_onUnsolicitedResponse通过HIDL返回上层
+7. 上层如果有新的调用，通过HIDL直接调用到相应的HIDL实现RadioImpl.funxx，最后调用vendor ril的vendorFunctions->onRequest
+来实现对modem下发命令
+8. request调用完成后调用RIL_Env.RIL_onRequestComplete通过hidl通知上层
+
+
+从上可以看出，RIL内部通过命令的方式进行通信和流程派发，有2种类型的命令：
+
+* Solicited Commands --- 主动请求命令，从上层产生往下派发，比如拨打电话，发送短信等
+
+* Unsolicited commands --- 被动请求命令，从modem产生发往上层，如来电，网络状态变化等
+
+**交互流程**
+
+以拨电话和来电两个最为典型的场景来说明ril的从上层到底层的各模块交互流程，以拨打电话为例，整个流程大致为
+
+![ril-dial]
+
+[ril-dial]: images/ril-dial.png "ril-dial" { width:auto; max-width:90% }
+
+
+以来电为例，流程为：
+
+![ril-incomingcall]
+
+[ril-incomingcall]: images/ril-incomingcall.png "ril-incomingcall" { width:auto; max-width:90% }
+
+
+
+
+
+# 通话流程解析
+
+## 主叫
+
+![Dial]
+
+[Dial]: images/Dial.png "Dial" { width:auto; max-width:90% }
+
+
+~ Remark
+以下分析只关注关键部分代码
+~
+-------------------
+
+
+* **package/app/Dialer -- DialpadFragment**
+
+用户点击拨号盘的拨号按钮，此时开始呼叫长征第一步，dialpadfragment的onclick方法会响应点击事件。
+
+``` javascript{background-color:Silver}
+public void onClick(View view) {
+    int resId = view.getId();
+    if (resId == R.id.dialpad_floating_action_button) {
+      view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+      handleDialButtonPressed();
+    } else 
+  }
+
+ private void handleDialButtonPressed() {
+    if (isDigitsEmpty()) { // No number entered.
+      // No real call made, so treat it as a click
+      PerformanceReport.recordClick(UiAction.Type.PRESS_CALL_BUTTON_WITHOUT_CALLING);
+      handleDialButtonClickWithEmptyDigits();
+    } else {
+      final String number = digits.getText().toString();
+      if (number != null
+          && !TextUtils.isEmpty(prohibitedPhoneNumberRegexp)
+          && number.matches(prohibitedPhoneNumberRegexp)) {
+       ...
+      } else {
+        PreCall.start(getContext(), new CallIntentBuilder
+          (number, CallInitiationType.Type.DIALPAD));
+        hideAndClearDialpad();
+      }
+    }
+  }
+```
+简单的判断了号码是否为空号和禁止号码，然后开始precall
+
+中间过程省略...
+
+-------------------
+* **packages/services/Telecomm -- CallsManager**
+
+
+``` javascript{background-color:Silver}
+public void placeOutgoingCall(Call call, Uri handle, GatewayInfo gatewayInfo,
+            boolean speakerphoneOn, int videoState) {
+        ...
+
+       final boolean requireCallCapableAccountByHandle = mContext.getResources().
+       getBoolean(
+                com.android.internal.R.bool.config_requireCallCapableAccountForHandle);
+        final boolean isOutgoingCallPermitted = isOutgoingCallPermitted(call,
+                call.getTargetPhoneAccount());
+        final String callHandleScheme =
+                call.getHandle() == null ? null : call.getHandle().getScheme();
+        if (call.getTargetPhoneAccount() != null || call.isEmergencyCall()) {
+              ...
+
+                call.startCreateConnection(mPhoneAccountRegistrar);
+            }
+        } 
+        ...
+    }
+
+public boolean isOutgoingCallPermitted(Call excludeCall,
+                                           PhoneAccountHandle phoneAccountHandle) {
+        if (phoneAccountHandle == null) {
+            return false;
+        }
+        PhoneAccount phoneAccount =
+                mPhoneAccountRegistrar.getPhoneAccountUnchecked(phoneAccountHandle);
+        if (phoneAccount == null) {
+            return false;
+        }
+
+        if (!phoneAccount.isSelfManaged()) {
+            return !hasMaximumManagedOutgoingCalls(excludeCall) &&
+                    !hasMaximumManagedDialingCalls(excludeCall) &&
+                    !hasMaximumManagedLiveCalls(excludeCall) &&
+                    !hasMaximumManagedHoldingCalls(excludeCall);
+        } else {
+            // Only permit self-managed outgoing calls if
+            // 1. there is no emergency ongoing call
+            // 2. The outgoing call is an handover call or it 
+            //not hit the self-managed call limit
+            // and the current active call can be held.
+            Call activeCall = (Call) mConnectionSvrFocusMgr.getCurrentFocusCall();
+            return !hasEmergencyCall() &&
+                   ((excludeCall != null && excludeCall.getHandoverSourceCall() != null)
+                       ||(!hasMaximumSelfManagedCalls(excludeCall, phoneAccountHandle)
+                        && (activeCall == null || canHold(activeCall))));
+        }
+    }
+```
+
+判断当前有无紧急通话，通话数是否达到上限(10，多人通话)，是否有通话转移等，然后调用startCreateConnection进行连接
+
+
+-------------------
+* **packages/services/Telecomm -- Call**
+
+创建CreateConnectionProcessor，并调用process方法：
+
+``` javascript{background-color:Silver}
+ void startCreateConnection(PhoneAccountRegistrar phoneAccountRegistrar) {
+        ...
+     mCreateConnectionProcessor = new CreateConnectionProcessor(this, mRepository, this,
+             phoneAccountRegistrar, mContext);
+     mCreateConnectionProcessor.process();
+ }
+
+```
+
+-------------------
+* **packages/services/Telecomm -- CreateConnectionProcessor**
+
+``` javascript{background-color:Silver}
+   public void process() {
+        ...
+        attemptNextPhoneAccount();
+    }
+    
+   private void attemptNextPhoneAccount() {
+        ...
+          mConnectionAttempt++;
+          mCall.setConnectionManagerPhoneAccount(attempt.connectionManagerPhoneAccount);
+          mCall.setTargetPhoneAccount(attempt.targetPhoneAccount);
+          mCall.setConnectionService(mService);
+          setTimeoutIfNeeded(mService, attempt);
+          if (mCall.isIncoming()) {
+              mService.createConnection(mCall, CreateConnectionProcessor.this);
+          } else {
+                    
+              mCall.getConnectionServiceFocusManager().requestFocus(
+                      mCall,
+                     new CallsManager.RequestCallback(new CallsManager.PendingAction() {
+                          @Override
+                          public void performAction() {
+                              Log.d(this, "perform create connection");
+                              mService.createConnection(
+                                      mCall,
+                                      CreateConnectionProcessor.this);
+                              }
+                          }));
+
+                }
+            }
+        } 
+        ...
+    }
+
+```
+
+调用ConnectionServiceWrapper mService的createConnection方法
+
+-------------------
+* **packages/services/Telecomm -- ConnectionServiceWrapper**
+
+通过bind建立成功后，会回调onSuccess方法，调用ConnectionService的createConnection()方法：
+
+``` javascript{background-color:Silver}
+public void createConnection(final Call call, final CreateConnectionResponse response) {
+        Log.d(this, "createConnection(%s) via %s.", call, getComponentName());
+        BindCallback callback = new BindCallback() {
+            @Override
+            public void onSuccess() {
+                ...
+
+                try {
+                    mServiceInterface.createConnection(
+                            call.getConnectionManagerPhoneAccount(),
+                            callId,
+                            connectionRequest,
+                            call.shouldAttachToExistingConnection(),
+                            call.isUnknown(),
+                            Log.getExternalSession());
+
+                } 
+                ...
+            }
+        };
+        mBinder.bind(callback, call);
+    }
+```
+
+-------------------
+* **frameworks/base/telecomm -- ConnectionService**
+
+ConnectionService是基类，实际实例化子类为TelephonyConnectionService，到这里终于进入了Telephony 服务
+
+``` javascript{background-color:Silver}
+private void createConnection(
+            final PhoneAccountHandle callManagerAccount,
+            final String callId,
+            final ConnectionRequest request,
+            boolean isIncoming,
+            boolean isUnknown) {
+        ...
+         connection = isUnknown ? onCreateUnknownConnection(callManagerAccount, request)
+                 : isIncoming ? onCreateIncomingConnection(callManagerAccount, request)
+                 : onCreateOutgoingConnection(callManagerAccount, request);
+        ...
+    }
+```
+
+-------------------
+* **frameworks/service/telephony -- TelephonyConnectionService**
+
+
+``` javascript{background-color:Silver}
+public Connection onCreateOutgoingConnection(
+            PhoneAccountHandle connectionManagerPhoneAccount,
+            final ConnectionRequest request) {
+        ...
+            if (resultConnection instanceof TelephonyConnection) {
+                if (request.getExtras() != null && request.getExtras().getBoolean(
+                        TelecomManager.EXTRA_USE_ASSISTED_DIALING, false)) {
+               ((TelephonyConnection) resultConnection).setIsUsingAssistedDialing(true);
+             }
+        placeOutgoingConnection((TelephonyConnection) resultConnection, phone, request);
+        }
+            return resultConnection;
+        }
+    }
+    
+    private void placeOutgoingConnection(
+           TelephonyConnection connection, Phone phone, int videoState, Bundle extras) {
+        String number = connection.getAddress().getSchemeSpecificPart();
+
+        com.android.internal.telephony.Connection originalConnection = null;
+        try {
+            if (phone != null) {
+              originalConnection = phone.dial(number, new ImsPhone.ImsDialArgs.Builder()
+                        .setVideoState(videoState)
+                        .setIntentExtras(extras)
+                        .setRttTextStream(connection.getRttTextStream())
+                        .build());
+            }
+        } 
+        ...
+    }
+```
+
+-------------------
+* **frameworks/opt/telephony -- GsmCdmaPhone**
+
+根据适配类型调用不同的phone dial，接着就是调用GsmCdmaCallTracker的dial方法
+
+``` javascript{background-color:Silver}
+ public Connection dial(String dialString, @NonNull DialArgs dialArgs)
+            throws CallStateException {
+        if (!isPhoneTypeGsm() && dialArgs.uusInfo != null) {
+         throw new CallStateException("Sending UUS information NOT supported in CDMA!");
+        }
+        ...
+     
+        if (isPhoneTypeGsm()) {
+            return dialInternal(dialString, new DialArgs.Builder<>()
+                    .setIntentExtras(dialArgs.intentExtras)
+                    .build());
+        } else {
+            return dialInternal(dialString, dialArgs);
+        }
+  }
+  
+  protected Connection dialInternal(String dialString, DialArgs dialArgs,
+            ResultReceiver wrappedCallback)
+            throws CallStateException {
+
+       ...
+        if (isPhoneTypeGsm()) {
+        // handle in-call MMI first if applicable
+        if (handleInCallMmiCommands(newDialString)) {
+            return null;
+        }
+
+        // Only look at the Network portion for mmi
+        String networkPortion = PhoneNumberUtils.
+                                extractNetworkPortionAlt(newDialString);
+        GsmMmiCode mmi = GsmMmiCode.newFromDialString(networkPortion, this,
+                mUiccApplication.get(), wrappedCallback);
+        if (DBG) logd("dialInternal: dialing w/ mmi '" + mmi + "'...");
+
+        if (mmi == null) {
+             return mCT.dialGsm(newDialString, dialArgs.uusInfo, dialArgs.intentExtras);
+        } else if (mmi.isTemporaryModeCLIR()) {
+            return mCT.dialGsm(mmi.mDialingNumber, mmi.getCLIRMode(), dialArgs.uusInfo,
+                    dialArgs.intentExtras);
+        } else {
+            mPendingMMIs.add(mmi);
+            mMmiRegistrants.notifyRegistrants(new AsyncResult(null, mmi, null));
+            mmi.processCode();
+            return null;
+        }
+    } else {
+        return mCT.dial(newDialString, dialArgs.intentExtras);
+    }
+```
+
+-------------------
+* **frameworks/opt/telephony -- GsmCdmaCallTracker**
+
+同样的调用Gsm或者Cdma的方法，以Cdma为例：
+``` javascript{background-color:Silver}
+ public Connection dial(String dialString, Bundle intentExtras) throws  {
+        if (isPhoneTypeGsm()) {
+            return dialGsm(dialString, CommandsInterface.CLIR_DEFAULT, intentExtras);
+        } else {
+            return dialCdma(dialString, CommandsInterface.CLIR_DEFAULT, intentExtras);
+        }
+    }
+    
+  private Connection dialCdma(String dialString, int clirMode, Bundle intentExtras)
+            throws CallStateException {
+        ...
+            // Always unmute when initiating a new call
+            setMute(false);
+
+            // Check data call
+            disableDataCallInEmergencyCall(dialString);
+
+            // In Ecm mode, if another emergency call is dialed, Ecm mode will not exit.
+            if(!isPhoneInEcmMode || (isPhoneInEcmMode && isEmergencyCall)) {
+                mCi.dial(mPendingMO.getAddress(), mPendingMO.isEmergencyCall(),
+                        mPendingMO.getEmergencyNumberInfo(),
+                        mPendingMO.hasKnownUserIntentEmergency(),
+                        clirMode, obtainCompleteMessage());
+            } 
+            
+            ...
+        updatePhoneState();
+        mPhone.notifyPreciseCallStateChanged();
+
+        return mPendingMO;
+    }
+
+```
+
+其中mCi定义为
+
+ public CommandsInterface mCi;
+ 
+ CommandsInterface为RIL的抽象接口类，定义了RIL的接口规范，RIL的实现类继承这个类。
+ 
+ 
+ 至此，分析了从App -> framework -> RIL流程，RIL的过程没有提及，将会在后面RIL章节做进一步分析。
+
+
+
+##呼入
+
+![Incall2]
+
+[Incall2]: images/Incall2.png "Incall2" { width:auto; max-width:90% }
+
+
+为了寻找入口,我们使用adb向模拟器进行模拟呼叫，使用命令 [adb emu gsm call 111]{ color=red } 向模拟器模拟一次呼叫，
+模拟号码为“111”，使用adb logcat -b radio查看无线相关日志，相关日志为：
+
+``` javascript
+06-19 09:38:14.636  4221  4221 D DCT     : [0]Data stall alarm
+06-19 09:38:19.793  1513  1624 D AT      : AT< RING
+06-19 09:38:19.816  4221  4238 D RILJ    : [UNSL]< UNSOL_RESPONSE_CALL_STATE_CHANGED [SUB0]
+06-19 09:38:19.824  4221  4221 D RILJ    : [8031]> GET_CURRENT_CALLS [SUB0]
+06-19 09:38:19.841  1513  1513 D RIL     : onRequest: GET_CURRENT_CALLS
+06-19 09:38:19.841  1513  1513 D AT      : AT> AT+CLCC
+06-19 09:38:19.841  1513  1624 D AT      : AT< +CLCC: 1,1,4,0,0,"111",129
+06-19 09:38:19.841  1513  1624 D AT      : AT< OK
+06-19 09:38:19.855  4221  4238 V RILJ    : Incoming UUS : NOT present! [SUB0]
+06-19 09:38:19.855  4221  4238 D RILJ    : InCall VoicePrivacy is disabled [SUB0]
+06-19 09:38:19.855  4221  4238 D RILJ    : [8031]< GET_CURRENT_CALLS {[id=1,INCOMING,toa=129,norm,mt,0,voc,noevp,,cli=1,,1] } [SUB0]
+06-19 09:38:19.856  4221  4221 D GsmCdmaCallTracker: Event EVENT_POLL_CALLS_RESULT Received
+06-19 09:38:19.856  4221  4221 D GsmCdmaCallTracker: [GsmCdmaCallTracker] pendingMo=null, dc=id=1,INCOMING,toa=129,norm,mt,0,voc,noevp,,cli=1,,1
+06-19 09:38:19.875  4221  4221 D GsmCdmaConnection: [GsmCdmaConn] acquireWakeLock
+06-19 09:38:19.887  4221  4221 D PhoneNumberUtils: slotId:0 subId:1 country:US emergencyNumbers: 
+06-19 09:38:19.887  4221  4221 D PhoneNumberUtils: System property doesn't provide any emergency numbers. Use embedded logic for determining ones.
+06-19 09:38:19.888  4221  4221 D GsmCdmaCallTracker: [GsmCdmaCallTracker] Notify new ring id=1,INCOMING,toa=129,norm,mt,0,voc,noevp,,cli=1,,1
+06-19 09:38:19.888  4221  4221 D GsmCdmaCallTracker: [GsmCdmaCallTracker] update phone state, old=IDLE new=RINGING
+06-19 09:38:19.909  4221  4221 E TelephonyMetrics: writePhoneState: Call session is missing
+06-19 09:38:19.960  3904  5944 D PhoneNumberUtils: slotId:0 subId:1 country:US emergencyNumbers: 
+06-19 09:38:19.961  3904  5944 D PhoneNumberUtils: System property doesn't provide any emergency numbers. Use embedded logic for determining ones.
+06-19 09:38:20.045  4221  4221 D DCT     : [0]onVoiceCallStarted
+06-19 09:38:20.047  4221  4221 D DCT     : [0]onVoiceCallStarted stop polling
+06-19 09:38:20.047  4221  4221 D DCT     : [0]stopNetStatPoll
+06-19 09:38:20.048  4221  4221 D DCT     : [0]notifyDataConnection: reason=2GVoiceCallStarted
+06-19 09:38:20.048  4221  4221 D DCT     : [0]notifyDataConnection: type:default
+```
+
+从上日志可以看出，modem接收到来电通知消息后，以AT指令的方式上报RIL层，上报事件ID: UNSOL_RESPONSE_CALL_STATE_CHANGED：
+
+-------------------
+
+* **hardware/ril/libril -- ril_service**
+
+UNSOL_RESPONSE_CALL_STATE_CHANGED命令处理函数callStateChangedInd，通知framework callStateChanged 
+
+``` javascript{background-color:Silver}
+int radio::callStateChangedInd(int slotId,
+                     int indicationType, int token, RIL_Errno e, void *response,
+                     size_t responseLen) {
+    if (radioService[slotId] != NULL 
+      && radioService[slotId]->mRadioIndication != NULL) {
+#if VDBG
+        RLOGD("callStateChangedInd");
+#endif
+        Return<void> retStatus = 
+        radioService[slotId]->mRadioIndication->callStateChanged(
+                convertIntToRadioIndicationType(indicationType));
+        radioService[slotId]->checkReturnStatus(retStatus);
+    } else {
+       RLOGE("callStateChangedInd: radioService[%d]->mRadioIndication == NULL", slotId);
+    }
+
+    return 0;
+}
+```
+
+-------------------
+
+* **frameworks/opt/telephony -- RadioIndication**
+
+使用RegistrantList通知订阅方，RegistrantList参阅[#registrantlist]
+
+``` javascript{background-color:Silver}
+public void callStateChanged(int indicationType) {
+        mRil.processIndication(indicationType);
+
+        if (RIL.RILJ_LOGD) mRil.unsljLog(RIL_UNSOL_RESPONSE_CALL_STATE_CHANGED);
+
+        mRil.mCallStateRegistrants.notifyRegistrants();
+    }
+```
+
+-------------------
+
+* **frameworks/opt/telephony -- GsmCdmaCallTracker**
+
+GsmCdmaCallTracker作为Registrant消息的订阅方，收到EVENT_CALL_STATE_CHANGE消息
+
+``` javascript{background-color:Silver}
+public void handleMessage(Message msg) {
+        AsyncResult ar;
+
+        switch (msg.what) {
+            ...
+
+            case EVENT_REPOLL_AFTER_DELAY:
+            case EVENT_CALL_STATE_CHANGE:
+                pollCallsWhenSafe();
+            break;
+            ...
+            
+    }
+```
+
+-------------------
+
+* **frameworks/opt/telephony -- CallTracker**
+
+CallTracker通过EVENT_POLL_CALLS_RESULT消息继续向RIL请求当前请求通话的信息
+
+``` javascript{background-color:Silver}
+
+   protected void pollCallsWhenSafe() {
+        mNeedsPoll = true;
+
+        if (checkNoOperationsPending()) {
+            mLastRelevantPoll = obtainMessage(EVENT_POLL_CALLS_RESULT);
+            mCi.getCurrentCalls(mLastRelevantPoll);
+        }
+    }
+```
+
+-------------------
+
+* **frameworks/opt/telephony -- RIL**
+
+通过RIL_REQUEST_GET_CURRENT_CALLS消息到native层请求当前通话
+
+``` javascript{background-color:Silver}
+
+  public void getCurrentCalls(Message result) {
+        IRadio radioProxy = getRadioProxy(result);
+        if (radioProxy != null) {
+            RILRequest rr = obtainRequest(RIL_REQUEST_GET_CURRENT_CALLS, result,
+                    mRILDefaultWorkSource);
+
+            if (RILJ_LOGD) {
+                riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
+            }
+
+            try {
+                radioProxy.getCurrentCalls(rr.mSerial);
+            } catch (RemoteException | RuntimeException e) {
+                handleRadioProxyExceptionForRR(rr, "getCurrentCalls", e);
+            }
+        }
+    }
+```
+-------------------
+
+* **hardware/ril/libril -- ril_service**
+
+ril层最终调用vendor提供的回调onRequest发送一条Solicited请求RIL_REQUEST_GET_CURRENT_CALLS
+
+``` javascript{background-color:Silver}
+  
+  Return<void> RadioImpl::getCurrentCalls(int32_t serial) {
+  #if VDBG
+      RLOGD("getCurrentCalls: serial %d", serial);
+  #endif
+      dispatchVoid(serial, mSlotId, RIL_REQUEST_GET_CURRENT_CALLS);
+      return Void();
+  }
+  
+  bool dispatchVoid(int serial, int slotId, int request) {
+    RequestInfo *pRI = android::addRequestToList(serial, slotId, request);
+    if (pRI == NULL) {
+        return false;
+    }
+    CALL_ONREQUEST(request, NULL, 0, pRI, slotId);
+    return true;   
+  }
+  
+  #if defined(ANDROID_MULTI_SIM)
+#define CALL_ONREQUEST(a, b, c, d, e) \
+        s_vendorFunctions->onRequest((a), (b), (c), (d), ((RIL_SOCKET_ID)(e)))
+#define CALL_ONSTATEREQUEST(a) s_vendorFunctions->onStateRequest((RIL_SOCKET_ID)(a))
+#else
+#define CALL_ONREQUEST(a, b, c, d, e) s_vendorFunctions->onRequest((a), (b), (c), (d))
+#define CALL_ONSTATEREQUEST(a) s_vendorFunctions->onStateRequest()
+#endif
+
+```
+
+收到response，将response通知到framework
+
+``` javascript{background-color:Silver}
+  
+int radio::getCurrentCallsResponse(int slotId,
+                                  int responseType, int serial, RIL_Errno e,
+                                  void *response, size_t responseLen) {
+#if VDBG
+    RLOGD("getCurrentCallsResponse: serial %d", serial);
+#endif
+
+    if (radioService[slotId]->mRadioResponse != NULL) {
+        ...
+
+        Return<void> retStatus = radioService[slotId]->mRadioResponse->
+                getCurrentCallsResponse(responseInfo, calls);
+        radioService[slotId]->checkReturnStatus(retStatus);
+    } else {
+        RLOGE("getCurrentCallsResponse: radioService[%d]->mRadioResponse == NULL",
+           slotId);
+    }
+
+    return 0;
+}
+```
+
+ 到底通知到哪里去了呢，libril通过提供setResponseFunctions接口来对mRadioResponse进行设置
+
+``` javascript{background-color:Silver}
+  
+Return<void> RadioImpl::setResponseFunctions(
+        const ::android::sp<IRadioResponse>& radioResponseParam,
+        const ::android::sp<IRadioIndication>& radioIndicationParam) {
+    RLOGD("setResponseFunctions");
+
+    pthread_rwlock_t *radioServiceRwlockPtr = radio::getRadioServiceRwlock(mSlotId);
+    int ret = pthread_rwlock_wrlock(radioServiceRwlockPtr);
+    assert(ret == 0);
+
+    mRadioResponse = radioResponseParam;
+    mRadioIndication = radioIndicationParam;
+    mRadioResponseV1_1 = V1_1::IRadioResponse::castFrom(mRadioResponse).
+    withDefault(nullptr);
+    mRadioIndicationV1_1 = V1_1::IRadioIndication::castFrom(mRadioIndication).
+    withDefault(nullptr);
+    if (mRadioResponseV1_1 == nullptr || mRadioIndicationV1_1 == nullptr) {
+        mRadioResponseV1_1 = nullptr;
+        mRadioIndicationV1_1 = nullptr;
+    }
+
+    mCounterRadio[mSlotId]++;
+
+    ret = pthread_rwlock_unlock(radioServiceRwlockPtr);
+    assert(ret == 0);
+
+    // client is connected. Send initial indications.
+    android::onNewCommandConnect((RIL_SOCKET_ID) mSlotId);
+
+    return Void();
+}
+```
+
+在RIL.java里面会进行设置：
+
+``` javascript{background-color:Silver}
+  
+public synchronized IRadio getRadioProxy(Message result) {
+        ...
+        try {
+            if (mDisabledRadioServices.contains(mPhoneId)) {
+                riljLoge("getRadioProxy: mRadioProxy for " + HIDL_SERVICE_NAME[mPhoneId]
+                        + " is disabled");
+            } else {
+                try {
+                    mRadioProxy = android.hardware.radio.V1_4.IRadio.getService(
+                            HIDL_SERVICE_NAME[mPhoneId], true);
+                    mRadioVersion = RADIO_HAL_VERSION_1_4;
+                } catch (NoSuchElementException e) {
+                }
+
+                ...
+
+                if (mRadioProxy != null) {
+                    mRadioProxy.linkToDeath(mRadioProxyDeathRecipient,
+                            mRadioProxyCookie.incrementAndGet());
+                    mRadioProxy.setResponseFunctions(mRadioResponse, mRadioIndication);
+                } else {
+                    mDisabledRadioServices.add(mPhoneId);
+                    riljLoge("getRadioProxy: mRadioProxy for "
+                            + HIDL_SERVICE_NAME[mPhoneId] + " is disabled");
+                }
+            }
+        } 
+        ...
+        return mRadioProxy;
+    }
+
+public RIL(Context context, int preferredNetworkType,
+            int cdmaSubscription, Integer instanceId) {
+            ...
+            mRadioResponse = new RadioResponse(this);
+            ...
+}
+
+```
+可以看到，RIL使用RadioResponse 对象来接收response
+
+
+-------------------
+
+* **frameworks/opt/telephony -- RadioResponse**
+
+使用processResponse从mRequestList中找到之前的request，然后通过sendMessageResponse将response发给之前发起request的对象，即
+CallTracker
+
+``` javascript{background-color:Silver}
+  
+  public void getCurrentCallsResponse(RadioResponseInfo responseInfo,
+                              ArrayList<android.hardware.radio.V1_0.Call> calls) {
+        responseCurrentCalls(responseInfo, calls);
+    }
+  
+private void responseCurrentCalls(RadioResponseInfo responseInfo,
+                       ArrayList<android.hardware.radio.V1_0.Call> calls) {
+       ...
+       RILRequest rr = mRil.processResponse(responseInfo);
+for (int i = 0; i < num; i++) {
+       dc = new DriverCall();
+       // TODO: change name of function stateFromCLCC() in DriverCall.java to name
+       // clarifying what is CLCC
+       dc.state = DriverCall.stateFromCLCC((int) (calls.get(i).state));
+       dc.index = calls.get(i).index;
+       dc.TOA = calls.get(i).toa;
+       dc.isMpty = calls.get(i).isMpty;
+       dc.isMT = calls.get(i).isMT;
+       dc.als = calls.get(i).als;
+       dc.isVoice = calls.get(i).isVoice;
+       dc.isVoicePrivacy = calls.get(i).isVoicePrivacy;
+       dc.number = calls.get(i).number;
+       dc.numberPresentation =
+               DriverCall.presentationFromCLIP(
+                       (int) (calls.get(i).numberPresentation));
+       dc.name = calls.get(i).name;
+       dc.namePresentation =
+               DriverCall.presentationFromCLIP((int) (calls.get(i).namePresentation));
+      ...
+
+       // Make sure there's a leading + on addresses with a TOA of 145
+       dc.number = PhoneNumberUtils.stringFromStringAndTOA(dc.number, dc.TOA);
+
+       dcCalls.add(dc);
+       ...
+   }
+
+   Collections.sort(dcCalls);
+
+   if (responseInfo.error == RadioError.NONE) {
+       sendMessageResponse(rr.mResult, dcCalls);
+   }
+   mRil.processResponseDone(rr, responseInfo, dcCalls);            
+        }
+    }
+}    
+
+static void sendMessageResponse(Message msg, Object ret) {
+        if (msg != null) {
+            AsyncResult.forMessage(msg, ret, null);
+            msg.sendToTarget();
+        }
+    }
+
+    
+```
+
+
+-------------------
+
+* **frameworks/opt/telephony -- GsmCdmaCallTracker**
+
+``` javascript{background-color:Silver}
+ 
+  
+public void handleMessage(Message msg) {
+        AsyncResult ar;
+
+        switch (msg.what) {
+            case EVENT_POLL_CALLS_RESULT:
+                Rlog.d(LOG_TAG, "Event EVENT_POLL_CALLS_RESULT Received");
+
+                if (msg == mLastRelevantPoll) {
+                    if (DBG_POLL) log(
+                            "handle EVENT_POLL_CALL_RESULT: set needsPoll=F");
+                    mNeedsPoll = false;
+                    mLastRelevantPoll = null;
+                    handlePollCalls((AsyncResult)msg.obj);
+                }
+            break;
+```
+
+接下来通过以下步骤将消息通知到telecomm服务：
+
+``` javascript{background-color:Silver}
+  handlePollCalls -> 
+  GsmCdmaPhone.notifyNewRingingConnection -> 
+  Phone.notifyNewRingingConnectionP ->(通过RegistratList)
+  PstnIncomingCallNotifier.handleNewRingingConnection
+```
+
+-------------------
+
+* **packages/services/telcomm**
+
+telcomm的步骤不再一一阐述，其中重要的几点为：
+
+**CallsManager**
+
+CallsManager 会在onSuccessfulIncomingCall中通过IncomingCallFilter来对设置了语音留言，黑名单，视频通话这几种情况进行处理
+
+``` javascript{background-color:Silver}
+  public void onSuccessfulIncomingCall(Call incomingCall) {
+        ...
+        incomingCall.setIsUsingCallFiltering(true);
+        List<IncomingCallFilter.CallFilter> filters = new ArrayList<>();
+        filters.add(new DirectToVoicemailCallFilter(mCallerInfoLookupHelper));
+        filters.add(new AsyncBlockCheckFilter(mContext, new BlockCheckerAdapter(),
+                mCallerInfoLookupHelper, null));
+        filters.add(new CallScreeningServiceController(mContext, 
+          this, mPhoneAccountRegistrar,
+            new ParcelableCallUtils.Converter(), mLock,
+            new TelecomServiceImpl.SettingsSecureAdapterImpl(), mCallerInfoLookupHelper,
+            new CallScreeningServiceHelper.AppLabelProxy() {
+                    @Override
+                    public CharSequence getAppLabel(String packageName) {
+                        PackageManager pm = mContext.getPackageManager();
+                        try {
+                          ApplicationInfo info = pm.getApplicationInfo(packageName, 0);
+                          return pm.getApplicationLabel(info);
+                        } catch (PackageManager.NameNotFoundException nnfe) {
+                          Log.w(this, "Could not determine package name.");
+                        }
+
+                        return null;
+                    }
+                }));
+        new IncomingCallFilter(mContext, this, incomingCall, mLock,
+                mTimeoutsAdapter, filters).performFiltering();
+    }
+```
+
+CallsManager 通过mListeners将addcall消息发送到各组件
+
+``` javascript{background-color:Silver}
+ mListeners.add(mInCallWakeLockController);
+ mListeners.add(statusBarNotifier);
+ mListeners.add(mCallLogManager);
+ mListeners.add(mPhoneStateBroadcaster);
+ mListeners.add(mInCallController);
+ mListeners.add(mCallAudioManager);
+ mListeners.add(mCallRecordingTonePlayer);
+ mListeners.add(missedCallNotifier);
+ mListeners.add(mHeadsetMediaButton);
+ mListeners.add(mProximitySensorManager);
+```
+
+在mCallLogManager会记录通话信息
+
+
+
+
+通过一系列调用最终来到app.Dialer.IncallServiceImpl.onCallAdded,从而通知到app。
+
+
+# 附录
+
+## RegistrantList { #RegistrantList }
+
+Android Telephony中大量使用RegistrantList进行消息处理，它是观察者模式的一种实现方式。
+
+![RegistrantList]
+
+[RegistrantList]: images/RegistrantList.png "RegistrantList" { width:auto; max-width:90% }
+
+其中：
+
+* RegistrantList是通知者
+* Registrant是观察者
+
+在android中注册观察者的方法一般都是类似于：registerXXX，我们以电话接听时的CallStateChanged为例：
+
+
+**注册观察者：**
+
+RIL 模块 BaseCommands提供注册函数
+
+``` javascript{background-color:Silver}
+ public void registerForCallStateChanged(Handler h, int what, Object obj) {
+        Registrant r = new Registrant (h, what, obj);
+
+        mCallStateRegistrants.add(r);
+    }
+```
+
+GsmCdmaCallTracker完成注册
+
+``` javascript{background-color:Silver}
+ public GsmCdmaCallTracker (GsmCdmaPhone phone) {
+        this.mPhone = phone;
+        mCi = phone.mCi;
+        mCi.registerForCallStateChanged(this, EVENT_CALL_STATE_CHANGE, null);
+        ...
+    }
+```
+
+**通知观察者：**
+
+
+RadioIndication在callStateChanged远程调用时发出通知，让注册观察者端进行处理相应的逻辑。
+
+``` javascript{background-color:Silver}
+  public void callStateChanged(int indicationType) {
+        ...
+
+        mRil.mCallStateRegistrants.notifyRegistrants();
+    }
+```
+
+观察者进行处理
+
+当注册观察者端接收到通知之后，就在对应的handleMessage中进行处理。
+比如注册的是EVENT_CALL_STATE_CHANGE，所以在对应的handleMessage中可以看到如下代码。
+
+``` javascript{background-color:Silver}
+  public void handleMessage(Message msg) {
+        AsyncResult ar;
+
+        switch (msg.what) {
+          ...
+          case EVENT_REPOLL_AFTER_DELAY:
+            case EVENT_CALL_STATE_CHANGE:
+                pollCallsWhenSafe();
+            break;
+            ...
+        }
+  }
+```
+
+时序图如下所示：
+
+![Registrant]
+
+[Registrant]: images/Registrant.png "Registrant" { width:auto; max-width:90% }
+
+
+~ End MainPanel
